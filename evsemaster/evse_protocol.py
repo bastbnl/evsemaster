@@ -1,11 +1,14 @@
 """Simple EVSE protocol implementation for Home Assistant integration."""
 
+import asyncio
 import logging
+import socket
 import struct
+import zoneinfo
+
 from typing import Any, Optional
 from datetime import datetime
-import asyncio
-import zoneinfo
+
 from .data_types import (
     CommandEnum,
     DataPacket,
@@ -16,12 +19,18 @@ from .data_types import (
     NotLoggedInError,
 )
 
+
 log = logging.getLogger(__name__)
 
 
 class _EVSEDatagramProtocol(asyncio.DatagramProtocol):
     def __init__(self, parent: "SimpleEVSEProtocol"):
         self.parent = parent
+
+    def connection_lost(self, exc):  # type: ignore[override]
+        log.info("Datagram connection lost")
+        self.parent._logged_in = False
+        self.parent._transport = None
 
     def datagram_received(self, data: bytes, addr):  # type: ignore[override]
         try:
@@ -32,32 +41,34 @@ class _EVSEDatagramProtocol(asyncio.DatagramProtocol):
     def error_received(self, exc):  # type: ignore[override]
         log.error(f"Datagram error received: {exc}")
 
-    def connection_lost(self, exc):  # type: ignore[override]
-        log.info("Datagram connection lost")
-        self.parent._logged_in = False
-        self.parent._transport = None
-
 
 class SimpleEVSEProtocol:
     """Simple implementation of EVSE protocol for HA integration."""
 
-    def __init__(self, host: str, password: str, event_callback: callable = None):
+    def __init__(
+        self,
+        host: str,
+        password: str,
+        event_callback: callable = None,
+        socket: asyncio.DatagramTransport = None,
+    ):
         """Initialize protocol handler."""
-        self.host = host
-        self.password = password
         self._event_callback = event_callback
+        self.host = host
         self.listen_port = 28376  # Port to listen for incoming datagrams
+        self.password = password
         self.send_port = 7248  # Default port to send to (will be updated by discovery)
+        self.socket = socket
         self.user_id = "evsemasterpy"  # Do all actions as this "user"
-        self._transport: Optional[asyncio.DatagramTransport] = None
-        self._login_future: Optional[asyncio.Future] = None
-        self._pending: dict[str, asyncio.Future] = {}
+        self._charging_status: Optional[ChargingStatus] = None
+        self._device_info: Optional[EvseDeviceInfo] = None
+        self._discovery_running = False
         self._logged_in = False
         self._login_attempts = 0
+        self._login_future: Optional[asyncio.Future] = None
+        self._pending: dict[str, asyncio.Future] = {}
         self._status: Optional[EvseStatus] = None
-        self._device_info: Optional[EvseDeviceInfo] = None
-        self._charging_status: Optional[ChargingStatus] = None
-        self._discovery_running = False
+        self._transport: Optional[asyncio.DatagramTransport] = None
 
     async def send_packet(self, data: bytes):
         if not self._transport:
@@ -70,12 +81,26 @@ class SimpleEVSEProtocol:
 
     async def connect(self) -> bool:
         """Create datagram endpoint and prepare transport."""
+        create_diagram_endpoint_kwargs = {}
+        if self.socket:
+            log.debug("Using existing socket")
+            # See if the socket has been bound to the correct port and bind it otherwise
+            try:
+                _ = self.socket.getsockname()
+            except (socket.error,) as e:
+                log.debug(f"Socket was not bound to port, binding to {self.listen_port}")
+                self.socket.bind(("0.0.0.0", self.listen_port))
+            create_diagram_endpoint_kwargs["socket"] = self.socket
+        else:
+            create_diagram_endpoint_kwargs["local_addr"] = ("0.0.0.0", self.listen_port)
+
         try:
             loop = asyncio.get_running_loop()
             self._transport, protocol = await loop.create_datagram_endpoint(
-                lambda: _EVSEDatagramProtocol(self), local_addr=("0.0.0.0", self.listen_port)
+                lambda: _EVSEDatagramProtocol(self),
+                **create_diagram_endpoint_kwargs,
             )
-            log.info("Datagram endpoint ready (listening %s:%d)", "0.0.0.0", self.listen_port)
+            log.info("Datagram endpoint ready (listening %s:%d)", self.local_interface, self.listen_port)
             return True
         except Exception as err:
             log.error(f"Failed to create datagram endpoint: {err}")
