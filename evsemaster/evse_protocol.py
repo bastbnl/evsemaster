@@ -100,8 +100,10 @@ class SimpleEVSEProtocol:
                 lambda: _EVSEDatagramProtocol(self),
                 **create_diagram_endpoint_kwargs,
             )
-            # Gets the address from the transport layer
-            socket_name = self._transport.getsockname()
+            # Gets the address from the transport layer via the connected socket
+            socket_name = self._transport.get_extra_info(
+                "socket",
+            ).getsockname()
             log.info(
                 f"Datagram endpoint ready (listening {socket_name[0]}:{socket_name[1]})",
             )
