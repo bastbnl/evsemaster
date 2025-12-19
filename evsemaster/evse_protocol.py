@@ -90,7 +90,7 @@ class SimpleEVSEProtocol:
             except (socket.error,) as e:
                 log.debug(f"Socket was not bound to port, binding to {self.listen_port}")
                 self.socket.bind(("0.0.0.0", self.listen_port))
-            create_diagram_endpoint_kwargs["socket"] = self.socket
+            create_diagram_endpoint_kwargs["sock"] = self.socket
         else:
             create_diagram_endpoint_kwargs["local_addr"] = ("0.0.0.0", self.listen_port)
 
