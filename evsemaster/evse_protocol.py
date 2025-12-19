@@ -100,7 +100,11 @@ class SimpleEVSEProtocol:
                 lambda: _EVSEDatagramProtocol(self),
                 **create_diagram_endpoint_kwargs,
             )
-            log.info("Datagram endpoint ready (listening %s:%d)", self.local_interface, self.listen_port)
+            # Gets the address from the transport layer
+            socket_name = self._transport.getsockname()
+            log.info(
+                f"Datagram endpoint ready (listening {socket_name[0]}:{socket_name[1]})",
+            )
             return True
         except Exception as err:
             log.error(f"Failed to create datagram endpoint: {err}")
