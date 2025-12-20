@@ -163,8 +163,10 @@ class SimpleEVSEProtocol:
         if self._event_callback:
             try:
                 self._event_callback(event_type, data)
-            except Exception as e:
-                log.error(f"Error in event callback: {e}")
+            except Exception:
+                log.exception(
+                    f"Callback processing for event {event_type} containing {data} failed",
+                )
 
     async def _on_datagram(self, data: bytes, addr):
         # Adjust discovered port if needed
