@@ -393,6 +393,10 @@ class SimpleEVSEProtocol:
         # Password (6 bytes)
         if self.password:
             password_bytes = self.password.encode("ascii")[:6]
+        else:
+            # Emit a warning, indicating that a password is required but not provided
+            log.warning("Password not provided, trying with empty password")
+            password_bytes = b"\x00\x00\x00\x00\x00\x00"
         packet[13 : 13 + len(password_bytes)] = password_bytes
         # Command
         struct.pack_into(">H", packet, 19, cmd)
